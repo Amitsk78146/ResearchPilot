@@ -3,3 +3,8 @@ python-dotenv
 pymupdf
 numpy
 faiss-cpu
+
+
+#  git add .
+# git commit -m "Add Data/Paper PDF"
+# git push
