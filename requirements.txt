@@ -1,2 +1,5 @@
+ollama
 python-dotenv
-pydantic
+pymupdf
+numpy
+faiss-cpu
