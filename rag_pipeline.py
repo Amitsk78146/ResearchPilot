@@ -7,6 +7,8 @@ from embedding_store import (
     search_database
 )
 
+from reranker import rerank_results
+
 from config import (
     OLLAMA_MODEL,
     OLLAMA_HOST,
@@ -20,32 +22,61 @@ import ollama
 client = ollama.Client(host=OLLAMA_HOST)
 
 
-# Step 1: Process research paper
+# STEP 1: Process research paper
 def load_research_paper(pdf_path):
+
+    print("\nExtracting PDF text...")
 
     pages = extract_text_from_pdf(pdf_path)
 
-    chunks = create_chunks(pages)
+    print("Creating text chunks...")
 
-    index, stored_chunks = create_vector_database(chunks)
+    chunks = create_chunks(
+        pages,
+        source=pdf_path
+    )
 
-    return index, stored_chunks
+    print("Generating embeddings and building hybrid database...")
+
+    index, stored_chunks, bm25_index = create_vector_database(chunks)
+
+    return index, stored_chunks, bm25_index
 
 
-# Step 2: Retrieve relevant information
-def retrieve_information(question, index, chunks):
+# STEP 2: Hybrid retrieval
+def retrieve_information(
+    question,
+    index,
+    chunks,
+    bm25_index
+):
 
     results = search_database(
         question,
         index,
         chunks,
+        bm25_index,
         top_k=10
     )
 
     return results
 
 
-# Step 3: Generate an evidence-based answer
+# STEP 3: Rerank retrieved passages
+def rerank_information(question, results):
+
+    print("\nReranking retrieved passages...")
+
+    reranked_results = rerank_results(
+        question,
+        results,
+        top_k=5
+    )
+
+    return reranked_results
+
+
+# STEP 4: Generate evidence-based answer
 def generate_answer(question, results):
 
     if not results:
@@ -56,7 +87,9 @@ def generate_answer(question, results):
     for i, result in enumerate(results):
 
         context += (
-            f"\n[Source {i+1}, Page {result['page']}]\n"
+            f"\n[Source: {result['source']}, "
+            f"Page: {result['page']}, "
+            f"Chunk: {result['chunk_id']}]\n"
             f"{result['text']}\n"
         )
 
@@ -75,13 +108,18 @@ def generate_answer(question, results):
                 research excerpts.
 
                 Instructions:
+
                 1. Do not invent experimental results.
                 2. Do not introduce unsupported facts.
-                3. Cite source pages using [Page N].
-                4. If the evidence is insufficient,
+                3. Cite sources using their PDF filename
+                   and page number.
+                4. Use citations in this format:
+                   [Source: filename, Page N].
+                5. If evidence is insufficient,
                    explicitly say so.
-                5. Distinguish reported findings
+                6. Distinguish reported findings
                    from your interpretation.
+                7. Never fabricate a citation.
                 """
             },
 
@@ -109,7 +147,34 @@ def generate_answer(question, results):
     return response["message"]["content"]
 
 
-# Step 4: Run ResearchPilot
+# STEP 5: Display retrieved sources
+def display_sources(results):
+
+    print("\n" + "=" * 60)
+    print("RERANKED SOURCES")
+    print("=" * 60)
+
+    for i, result in enumerate(results):
+
+        print(f"\n--- RESULT {i+1} ---")
+
+        print("Source:", result["source"])
+        print("Page:", result["page"])
+        print("Chunk ID:", result["chunk_id"])
+
+        print("FAISS similarity:", result["similarity"])
+
+        print("BM25 score:", f"{result['bm25_score']:.3f}")
+
+        print("Hybrid score:", f"{result['hybrid_score']:.5f}")
+
+        print("Rerank score:", f"{result['rerank_score']:.4f}")
+
+        print("\nRetrieved text:")
+        print(result["text"][:500])
+
+
+# STEP 6: Run ResearchPilot
 if __name__ == "__main__":
 
     pdf_path = input(
@@ -118,39 +183,54 @@ if __name__ == "__main__":
 
     print("\nLoading research paper...")
 
-    index, chunks = load_research_paper(pdf_path)
+    index, chunks, bm25_index = load_research_paper(pdf_path)
 
-    print("Research paper processed.")
+    print("\nResearch paper processed successfully.")
+
     print("Total chunks:", len(chunks))
+    print("Total FAISS vectors:", index.ntotal)
+
+    print("\nResearchPilot is ready!")
+    print("Type 'exit' to stop.")
 
     while True:
 
-        question = input("\nYou: ")
+        question = input("\nYou: ").strip()
 
         if question.lower() == "exit":
+            print("\nResearchPilot session ended.")
             break
 
+        if not question:
+            continue
+
+        # Hybrid retrieval
         results = retrieve_information(
             question,
             index,
-            chunks
+            chunks,
+            bm25_index
         )
 
-        print("\nResearchPilot is analysing...\n")
-
-        answer = generate_answer(
+        # Cross-encoder reranking
+        reranked_results = rerank_information(
             question,
             results
         )
 
-        print("RESEARCHPILOT:\n")
+        # Generate answer from reranked passages
+        print("\nResearchPilot is analysing...\n")
+
+        answer = generate_answer(
+            question,
+            reranked_results
+        )
+
+        print("\n" + "=" * 60)
+        print("RESEARCHPILOT ANSWER")
+        print("=" * 60)
+
         print(answer)
 
-        print("\nRETRIEVED SOURCES:")
-
-        for result in results:
-
-            print(
-                f"Page {result['page']} | "
-                f"Similarity: {result['similarity']:.3f}"
-            )
+        # Display final ranked sources
+        display_sources(reranked_results)
