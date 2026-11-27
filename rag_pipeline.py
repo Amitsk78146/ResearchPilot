@@ -7,8 +7,6 @@ from embedding_store import (
     search_database
 )
 
-from reranker import rerank_results
-
 from config import (
     OLLAMA_MODEL,
     OLLAMA_HOST,
@@ -43,13 +41,15 @@ def load_research_paper(pdf_path):
     return index, stored_chunks, bm25_index
 
 
-# STEP 2: Hybrid retrieval
+# STEP 2: Hybrid retrieval using FAISS + BM25 + RRF
 def retrieve_information(
     question,
     index,
     chunks,
     bm25_index
 ):
+
+    print("\nSearching research paper...")
 
     results = search_database(
         question,
@@ -62,21 +62,7 @@ def retrieve_information(
     return results
 
 
-# STEP 3: Rerank retrieved passages
-def rerank_information(question, results):
-
-    print("\nReranking retrieved passages...")
-
-    reranked_results = rerank_results(
-        question,
-        results,
-        top_k=5
-    )
-
-    return reranked_results
-
-
-# STEP 4: Generate evidence-based answer
+# STEP 3: Generate evidence-based answer
 def generate_answer(question, results):
 
     if not results:
@@ -147,11 +133,11 @@ def generate_answer(question, results):
     return response["message"]["content"]
 
 
-# STEP 5: Display retrieved sources
+# STEP 4: Display retrieved sources
 def display_sources(results):
 
     print("\n" + "=" * 60)
-    print("RERANKED SOURCES")
+    print("HYBRID RETRIEVAL RESULTS")
     print("=" * 60)
 
     for i, result in enumerate(results):
@@ -168,18 +154,16 @@ def display_sources(results):
 
         print("Hybrid score:", f"{result['hybrid_score']:.5f}")
 
-        print("Rerank score:", f"{result['rerank_score']:.4f}")
-
         print("\nRetrieved text:")
         print(result["text"][:500])
 
 
-# STEP 6: Run ResearchPilot
+# STEP 5: Run ResearchPilot
 if __name__ == "__main__":
 
     pdf_path = input(
         "Enter research paper path: "
-    )
+    ).strip().strip('"')
 
     print("\nLoading research paper...")
 
@@ -212,18 +196,12 @@ if __name__ == "__main__":
             bm25_index
         )
 
-        # Cross-encoder reranking
-        reranked_results = rerank_information(
-            question,
-            results
-        )
-
-        # Generate answer from reranked passages
+        # Generate answer directly from hybrid results
         print("\nResearchPilot is analysing...\n")
 
         answer = generate_answer(
             question,
-            reranked_results
+            results
         )
 
         print("\n" + "=" * 60)
@@ -232,5 +210,5 @@ if __name__ == "__main__":
 
         print(answer)
 
-        # Display final ranked sources
-        display_sources(reranked_results)
+        # Display retrieved sources
+        display_sources(results)

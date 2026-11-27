@@ -1,10 +1,7 @@
+
 ollama
 python-dotenv
 pymupdf
 numpy
 faiss-cpu
-
-
-git add .
-git commit -m "Changes"
-git push
+rank-bm25

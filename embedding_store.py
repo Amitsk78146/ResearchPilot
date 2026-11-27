@@ -18,7 +18,10 @@ EMBEDDING_MODEL = "nomic-embed-text"
 def tokenize(text):
 
     # Convert Unicode chemical subscripts to normal digits
-    translation = str.maketrans("₀₁₂₃₄₅₆₇₈₉", "0123456789")
+    translation = str.maketrans(
+        "₀₁₂₃₄₅₆₇₈₉",
+        "0123456789"
+    )
     text = text.translate(translation)
 
     # Preserve chemical formulas and numerical values
