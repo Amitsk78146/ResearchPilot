@@ -1,18 +1,11 @@
-
 import os
 import re
 import json
 import hashlib
-import ollama
 
 from document_processor import extract_text_from_pdf
-from config import (
-    OLLAMA_MODEL,
-    OLLAMA_HOST,
-    TEMPERATURE
-)
-
-client = ollama.Client(host=OLLAMA_HOST)
+from llm_backend import generate_text
+from config import OLLAMA_MODEL
 
 # ==============================
 # CONFIGURATION
@@ -153,37 +146,30 @@ Evidence:
 
 def ask_llm(prompt, max_tokens=ANALYSIS_TOKENS):
 
-    response = client.chat(
-        model=OLLAMA_MODEL,
-        messages=[
-            {
-                "role": "system",
-                "content": SYSTEM_PROMPT
-            },
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ],
-        options={
-            "temperature": TEMPERATURE,
-            "num_predict": max_tokens,
-            "num_ctx": NUM_CTX
-        }
+    return generate_text(
+        prompt=prompt,
+        system_prompt=SYSTEM_PROMPT,
+        max_tokens=max_tokens,
+        num_ctx=NUM_CTX
     )
-
-    return response["message"]["content"].strip()
-
 
 # ==============================
 # CACHE MANAGEMENT
 # ==============================
 
+
 def get_cache_path(paper_name, chunk_index, text):
 
+    cache_content = (
+        OLLAMA_MODEL
+        + SYSTEM_PROMPT
+        + ANALYSIS_PROMPT
+        + text
+    )
+
     content_hash = hashlib.sha256(
-        text.encode("utf-8")
-    ).hexdigest()[:16]
+        cache_content.encode("utf-8")
+    ).hexdigest()[:20]
 
     safe_name = re.sub(
         r"[^a-zA-Z0-9_-]",
@@ -197,6 +183,7 @@ def get_cache_path(paper_name, chunk_index, text):
     )
 
     return os.path.join(CACHE_DIR, filename)
+
 
 
 def load_cache(cache_path):
@@ -351,10 +338,81 @@ def analyse_chunk(
 # EVIDENCE CONSOLIDATION
 # ==============================
 
-def consolidate_evidence(
-    evidence_list,
-    paper_name
-):
+
+def consolidate_evidence(evidence_list, paper_name):
+
+    if not evidence_list:
+        raise ValueError("No research evidence extracted.")
+
+    batch_size = 3
+    current_evidence = evidence_list
+    round_number = 1
+
+    while len(current_evidence) > 1:
+
+        print(
+            f"\nConsolidation round {round_number}: "
+            f"{len(current_evidence)} evidence sections"
+        )
+
+        next_evidence = []
+
+        for start in range(
+            0,
+            len(current_evidence),
+            batch_size
+        ):
+
+            batch = current_evidence[
+                start:start + batch_size
+            ]
+
+            evidence_text = "\n\n".join(batch)
+
+            prompt = f"""
+You are consolidating scientific evidence
+from the same research paper.
+
+Paper: {paper_name}
+
+Analyse and combine the following evidence.
+
+Requirements:
+- Remove repetitive information.
+- Preserve all important numerical values and units.
+- Retain original PDF page references.
+- Preserve conflicting findings instead of silently
+  choosing one.
+- Do not invent experimental information.
+- Distinguish reported results from interpretations.
+- Retain catalyst activity and stability information.
+- Retain carbon deposition and deactivation findings.
+- Do not discard useful experimental details.
+
+Evidence:
+
+{evidence_text}
+
+Return the consolidated scientific evidence.
+"""
+
+            print(
+                f"Consolidating batch "
+                f"{start // batch_size + 1}..."
+            )
+
+            consolidated = ask_llm(
+                prompt,
+                max_tokens=1200
+            )
+
+            next_evidence.append(consolidated)
+
+        current_evidence = next_evidence
+        round_number += 1
+
+    return current_evidence[0]
+
 
     # One call is sufficient for a manageable evidence set.
     evidence = "\n\n".join(evidence_list)
@@ -505,7 +563,7 @@ def summarize_research_paper(
 # ==============================
 
 def summarize_all_papers(
-    paper_directory="Data/Paper"
+    paper_directory="data/Paper"
 ):
 
     if not os.path.isdir(paper_directory):

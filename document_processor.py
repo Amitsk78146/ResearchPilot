@@ -1,5 +1,5 @@
 
-import fitz
+import pymupdf as fitz
 import os
 
 
